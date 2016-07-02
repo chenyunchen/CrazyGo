@@ -7,19 +7,28 @@ import (
 	"time"
 )
 
-type test struct{}
+type Handler func(next http.Handler) http.Handler
 
-func (h test) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Test")
+// Merge Multiple Handler
+// ==========================================================
+type Execute struct {
+	fn func(http.ResponseWriter, *http.Request)
 }
 
-//func chain(ch ...http.Handler) http.Handler {
-//	for c := range ch {
-//
-//	}
-//}
+func (h Execute) Check(x []Handler) http.Handler {
+	var chain http.Handler
+	chain = http.HandlerFunc(h.fn)
+	for _, fn := range x {
+		chain = fn(chain)
+	}
+	return chain
+}
 
-func loggingHandler(next http.Handler) http.Handler {
+// ==========================================================
+
+// Define Handler
+// ----------------------------------------------------------
+func logH(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		t1 := time.Now()
 		next.ServeHTTP(w, r)
@@ -29,7 +38,7 @@ func loggingHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func errorHandler(next http.Handler) http.Handler {
+func errorH(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -43,7 +52,14 @@ func errorHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
+// ----------------------------------------------------------
+
+// Test Example for Handlers
+func test(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Test")
+}
+
 func main() {
-	http.Handle("/", errorHandler(loggingHandler(test{})))
+	http.Handle("/", Execute{test}.Check([]Handler{logH, errorH}))
 	http.ListenAndServe(":8080", nil)
 }
