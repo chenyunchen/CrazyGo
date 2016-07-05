@@ -9,7 +9,32 @@ import (
 
 type Handler func(next http.Handler) http.Handler
 
-// context
+// Router
+// ==========================================================
+type Server struct{}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/test" {
+		test(w, r)
+		return
+	}
+	http.NotFound(w, r)
+	return
+}
+
+//func (s Server) Get(path string, outerFn func(http.ResponseWriter, *http.Request)) {
+//	innerFn := func(w http.ResponseWriter, r *http.Request) {
+//		if r.Method != "GET" {
+//			http.Error(w, "Method Not Allowed", 405)
+//		} else {
+//			http.HandleFunc(path, outerFn(w, r))
+//		}
+//	}
+//}
+
+// ==========================================================
+
+// Context
 // ----------------------------------------------------------
 type context struct {
 	data map[*http.Request]map[interface{}]interface{}
@@ -92,11 +117,13 @@ func authH(next http.Handler) http.Handler {
 // Test Example for Handlers
 func test(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Test")
-	user := c.Get(r, "user").(map[string]string)
-	fmt.Println("Name:", user["name"])
+	//user := c.Get(r, "user").(map[string]string)
+	//fmt.Println("Name:", user["name"])
 }
 
 func main() {
-	http.Handle("/test", Execute{test}.Check(logH, errorH, authH))
-	http.ListenAndServe(":8080", nil)
+	server := &Server{}
+	//server.Get("/test", test)
+	//http.Handle("/test", Execute{test}.Check(logH, errorH, authH))
+	http.ListenAndServe(":8080", server)
 }
