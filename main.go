@@ -11,26 +11,57 @@ type Handler func(next http.Handler) http.Handler
 
 // Router
 // ==========================================================
-type Server struct{}
+
+type Server struct {
+	router map[string]map[string][]func(http.ResponseWriter, *http.Request)
+}
+
+func New() *Server {
+	return &Server{make(map[string]map[string][]func(http.ResponseWriter, *http.Request))}
+}
+
+func handleVerbs(method string, s *Server, path string, fn func(http.ResponseWriter, *http.Request)) {
+	_, ok := s.router[path]
+	if !ok {
+		s.router[path] = make(map[string][]func(http.ResponseWriter, *http.Request))
+	}
+	_, ok = s.router[path][method]
+	if !ok {
+		s.router[path][method] = make([]func(http.ResponseWriter, *http.Request), 0)
+	}
+	s.router[path][method] = append(s.router[path][method], fn)
+}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/test" {
-		test(w, r)
-		return
+	for key, value := range s.router {
+		if r.URL.Path == key {
+			for k, v := range value {
+				if r.Method == k {
+					v[0](w, r)
+					return
+				}
+			}
+		}
 	}
 	http.NotFound(w, r)
 	return
 }
 
-//func (s Server) Get(path string, outerFn func(http.ResponseWriter, *http.Request)) {
-//	innerFn := func(w http.ResponseWriter, r *http.Request) {
-//		if r.Method != "GET" {
-//			http.Error(w, "Method Not Allowed", 405)
-//		} else {
-//			http.HandleFunc(path, outerFn(w, r))
-//		}
-//	}
-//}
+func (s *Server) Get(path string, fn func(http.ResponseWriter, *http.Request)) {
+	handleVerbs("GET", s, path, fn)
+}
+
+func (s *Server) Post(path string, fn func(http.ResponseWriter, *http.Request)) {
+	handleVerbs("POST", s, path, fn)
+}
+
+func (s *Server) Put(path string, fn func(http.ResponseWriter, *http.Request)) {
+	handleVerbs("PUT", s, path, fn)
+}
+
+func (s *Server) Delete(path string, fn func(http.ResponseWriter, *http.Request)) {
+	handleVerbs("DELETE", s, path, fn)
+}
 
 // ==========================================================
 
@@ -39,6 +70,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type context struct {
 	data map[*http.Request]map[interface{}]interface{}
 }
+
+var c context = context{make(map[*http.Request]map[interface{}]interface{})}
 
 func (con *context) Set(r *http.Request, key, value interface{}) {
 	_, ok := con.data[r]
@@ -51,9 +84,6 @@ func (con *context) Set(r *http.Request, key, value interface{}) {
 func (con context) Get(r *http.Request, key interface{}) interface{} {
 	return con.data[r][key]
 }
-
-// Make just init outer map!
-var c = context{make(map[*http.Request]map[interface{}]interface{})}
 
 // ----------------------------------------------------------
 
@@ -122,8 +152,8 @@ func test(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	server := &Server{}
-	//server.Get("/test", test)
+	app := New()
+	app.Get("/test", test)
 	//http.Handle("/test", Execute{test}.Check(logH, errorH, authH))
-	http.ListenAndServe(":8080", server)
+	http.ListenAndServe(":8080", app)
 }
