@@ -7,29 +7,28 @@ import (
 	"time"
 )
 
-type Handler func(next http.Handler) http.Handler
+type Handler struct {
+	next func(http.ResponseWriter, *http.Request)
+}
 
 // Router
 // ==========================================================
 
 type Server struct {
-	router map[string]map[string][]func(http.ResponseWriter, *http.Request)
+	router      map[string]map[string]func(http.ResponseWriter, *http.Request)
+	middlewares []func(Handler) Handler
 }
 
 func New() *Server {
-	return &Server{make(map[string]map[string][]func(http.ResponseWriter, *http.Request))}
+	return &Server{make(map[string]map[string]func(http.ResponseWriter, *http.Request)), make([]func(Handler) Handler, 0)}
 }
 
 func handleVerbs(method string, s *Server, path string, fn func(http.ResponseWriter, *http.Request)) {
 	_, ok := s.router[path]
 	if !ok {
-		s.router[path] = make(map[string][]func(http.ResponseWriter, *http.Request))
+		s.router[path] = make(map[string]func(http.ResponseWriter, *http.Request))
 	}
-	_, ok = s.router[path][method]
-	if !ok {
-		s.router[path][method] = make([]func(http.ResponseWriter, *http.Request), 0)
-	}
-	s.router[path][method] = append(s.router[path][method], fn)
+	s.router[path][method] = fn
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -37,14 +36,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == key {
 			for k, v := range value {
 				if r.Method == k {
-					v[0](w, r)
-					return
+					if len(s.middlewares) > 0 {
+						Merge(w, r, Handler{v}, s.middlewares)
+						return
+					} else {
+						v(w, r)
+						return
+					}
 				}
 			}
 		}
 	}
 	http.NotFound(w, r)
 	return
+}
+
+func (s *Server) Use(fn func(Handler) Handler) {
+	s.middlewares = append(s.middlewares, fn)
 }
 
 func (s *Server) Get(path string, fn func(http.ResponseWriter, *http.Request)) {
@@ -89,34 +97,31 @@ func (con context) Get(r *http.Request, key interface{}) interface{} {
 
 // Merge Multiple Handler
 // ==========================================================
-type Execute struct {
-	fn func(http.ResponseWriter, *http.Request)
-}
-
-func (ex Execute) Check(hs ...Handler) http.Handler {
-	var chain http.Handler
-	chain = http.HandlerFunc(ex.fn)
-	for _, fn := range hs {
-		chain = fn(chain)
+func Merge(w http.ResponseWriter, r *http.Request, h Handler, middlewares []func(Handler) Handler) {
+	var chain Handler
+	chain = middlewares[0](h)
+	size := len(middlewares)
+	for _, middleware := range middlewares[size-1:] {
+		chain = middleware(chain)
 	}
-	return chain
+	chain.next(w, r)
 }
 
 // ==========================================================
 
 // Define Handler
 // ----------------------------------------------------------
-func logH(next http.Handler) http.Handler {
+func logH(h Handler) Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		t1 := time.Now()
-		next.ServeHTTP(w, r)
+		h.next(w, r)
 		t2 := time.Now()
 		log.Printf("[%s] %q %v\n", r.Method, r.URL.String(), t2.Sub(t1))
 	}
-	return http.HandlerFunc(fn)
+	return Handler{fn}
 }
 
-func errorH(next http.Handler) http.Handler {
+func errorH(h Handler) Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -125,21 +130,21 @@ func errorH(next http.Handler) http.Handler {
 			}
 		}()
 
-		next.ServeHTTP(w, r)
+		h.next(w, r)
 	}
-	return http.HandlerFunc(fn)
+	return Handler{fn}
 }
 
 //Auth Example
-func authH(next http.Handler) http.Handler {
+func authH(h Handler) Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		// Do something check user identity
 		user := make(map[string]string)
 		user["name"] = "test"
 		c.Set(r, "user", user)
-		next.ServeHTTP(w, r)
+		h.next(w, r)
 	}
-	return http.HandlerFunc(fn)
+	return Handler{fn}
 }
 
 // ----------------------------------------------------------
@@ -147,13 +152,15 @@ func authH(next http.Handler) http.Handler {
 // Test Example for Handlers
 func test(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Test")
-	//user := c.Get(r, "user").(map[string]string)
-	//fmt.Println("Name:", user["name"])
+	user := c.Get(r, "user").(map[string]string)
+	fmt.Println("Name:", user["name"])
 }
 
 func main() {
 	app := New()
+	app.Use(logH)
+	app.Use(errorH)
+	app.Use(authH)
 	app.Get("/test", test)
-	//http.Handle("/test", Execute{test}.Check(logH, errorH, authH))
 	http.ListenAndServe(":8080", app)
 }
