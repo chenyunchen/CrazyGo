@@ -1,19 +1,41 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"time"
 )
 
-type Handler struct {
-	next func(http.ResponseWriter, *http.Request)
+// Error
+// ----------------------------------------------------------
+type Errors struct {
+	Errors []*Error `json:"errors"`
 }
+type Error struct {
+	Type   string `json:"type"`
+	Status int    `json:"status"`
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+}
+
+var (
+	InternalServerError = &Error{"internal_server_error", 500, "Internal Server Error", "OMG"}
+	NotAcceptableError  = &Error{"not_acceptable_error", 406, "Not Acceptable", "OMG"}
+	CrazyError          = &Error{"crazy_error", 000, "I'm Crazy.", "◓ Д ◒"}
+)
+
+func ResError(w http.ResponseWriter, err *Error) {
+	w.Header().Set("Content-Type", "application/vnd.api+json")
+	w.WriteHeader(err.Status)
+	json.NewEncoder(w).Encode(Errors{[]*Error{err}})
+}
+
+// ----------------------------------------------------------
 
 // Router
 // ==========================================================
-
 type Server struct {
 	router      map[string]map[string]func(http.ResponseWriter, *http.Request)
 	middlewares []func(Handler) Handler
@@ -111,6 +133,10 @@ func Merge(w http.ResponseWriter, r *http.Request, h Handler, middlewares []func
 
 // Define Handler
 // ----------------------------------------------------------
+type Handler struct {
+	next func(http.ResponseWriter, *http.Request)
+}
+
 func logH(h Handler) Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		t1 := time.Now()
@@ -126,7 +152,7 @@ func errorH(h Handler) Handler {
 		defer func() {
 			if err := recover(); err != nil {
 				log.Printf("[Error] %+v", err)
-				http.Error(w, http.StatusText(500), 500)
+				ResError(w, InternalServerError)
 			}
 		}()
 
@@ -135,12 +161,30 @@ func errorH(h Handler) Handler {
 	return Handler{fn}
 }
 
+func checkHeaderH(h Handler) Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "application/vnd.api+json" {
+			ResError(w, NotAcceptableError)
+			return
+		}
+
+		h.next(w, r)
+	}
+	return Handler{fn}
+}
+
 //Auth Example
+type User struct {
+	Id         int    `json:"id"`
+	FirstName  string `json:"first_name"`
+	LastName   string `json:"last_name"`
+	MiddleName string `json:"middle_name,omitempty"`
+}
+
 func authH(h Handler) Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		// Do something check user identity
-		user := make(map[string]string)
-		user["name"] = "test"
+		user := User{1234567, "◓ Д ◒", "ˊ● ω ●ˋ", ""}
 		c.Set(r, "user", user)
 		h.next(w, r)
 	}
@@ -152,15 +196,27 @@ func authH(h Handler) Handler {
 // Test Example for Handlers
 func test(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Test")
-	user := c.Get(r, "user").(map[string]string)
-	fmt.Println("Name:", user["name"])
+}
+
+// Test JSON Example for Handlers
+func testJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/vnd.api+json")
+	user := c.Get(r, "user")
+	json.NewEncoder(w).Encode(user)
+}
+
+// Test Error Example for Handlers
+func testError(w http.ResponseWriter, r *http.Request) {
+	ResError(w, CrazyError)
 }
 
 func main() {
 	app := New()
 	app.Use(logH)
 	app.Use(errorH)
-	app.Use(authH)
+	//app.Use(authH)
 	app.Get("/test", test)
+	//app.Get("/jsontest", testJSON)
+	app.Get("/jsonerror", testError)
 	http.ListenAndServe(":8080", app)
 }
