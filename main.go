@@ -167,7 +167,21 @@ func checkHeaderH(h Handler) Handler {
 			ResError(w, NotAcceptableError)
 			return
 		}
+		h.next(w, r)
+	}
+	return Handler{fn}
+}
 
+func bodyParseH(h Handler) Handler {
+	// curl -H 'Accept: application/vnd.api+json' -d '{"id":1234567, "first_name":"◓ Д ◒", "last_name":"ˊ● ω ●ˋ", "middle_name":""}' http://localhost:8080/postjson
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		user := User{}
+		err := json.NewDecoder(r.Body).Decode(&user)
+		if err != nil {
+			ResError(w, NotAcceptableError)
+			return
+		}
+		c.Set(r, "body", user)
 		h.next(w, r)
 	}
 	return Handler{fn}
@@ -210,13 +224,23 @@ func testError(w http.ResponseWriter, r *http.Request) {
 	ResError(w, CrazyError)
 }
 
+// Test Error Example for Handlers
+func postJSON(w http.ResponseWriter, r *http.Request) {
+	user := c.Get(r, "body").(User)
+	fmt.Println(user.Id)
+	fmt.Println(user.FirstName)
+	fmt.Println(user.LastName)
+}
+
 func main() {
 	app := New()
 	app.Use(logH)
 	app.Use(errorH)
+	app.Use(bodyParseH)
 	//app.Use(authH)
 	app.Get("/test", test)
 	//app.Get("/jsontest", testJSON)
 	app.Get("/jsonerror", testError)
+	app.Post("/postjson", postJSON)
 	http.ListenAndServe(":8080", app)
 }
