@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
+	"path"
 	"time"
 )
 
@@ -30,6 +32,23 @@ func ResError(w http.ResponseWriter, err *Error) {
 	w.Header().Set("Content-Type", "application/vnd.api+json")
 	w.WriteHeader(err.Status)
 	json.NewEncoder(w).Encode(Errors{[]*Error{err}})
+}
+
+// ----------------------------------------------------------
+
+//HTML & JSON
+// ----------------------------------------------------------
+func Render(w http.ResponseWriter, filename string, data interface{}) {
+	filepath := path.Join("templates", filename)
+	temp, err := template.ParseFiles(filepath)
+	if err != nil {
+		ResError(w, InternalServerError)
+		return
+	}
+	err = temp.Execute(w, data)
+	if err != nil {
+		ResError(w, InternalServerError)
+	}
 }
 
 // ----------------------------------------------------------
@@ -232,15 +251,22 @@ func postJSON(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(user.LastName)
 }
 
+// Test HTML Example for Handlers
+func getHTML(w http.ResponseWriter, r *http.Request) {
+	user := c.Get(r, "user")
+	Render(w, "index.html", user)
+}
+
 func main() {
 	app := New()
 	app.Use(logH)
 	app.Use(errorH)
 	app.Use(bodyParseH)
-	//app.Use(authH)
+	app.Use(authH)
 	app.Get("/test", test)
-	//app.Get("/jsontest", testJSON)
+	app.Get("/jsontest", testJSON)
 	app.Get("/jsonerror", testError)
 	app.Post("/postjson", postJSON)
+	app.Get("/gethtml", getHTML)
 	http.ListenAndServe(":8080", app)
 }
