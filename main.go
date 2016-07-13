@@ -56,20 +56,27 @@ func Render(w http.ResponseWriter, filename string, data interface{}) {
 // Router
 // ==========================================================
 type Server struct {
-	router      map[string]map[string]func(http.ResponseWriter, *http.Request)
+	router      map[string]map[string][]interface{}
 	middlewares []func(Handler) Handler
 }
 
 func New() *Server {
-	return &Server{make(map[string]map[string]func(http.ResponseWriter, *http.Request)), make([]func(Handler) Handler, 0)}
+	return &Server{make(map[string]map[string][]interface{}), make([]func(Handler) Handler, 0)}
 }
 
-func handleVerbs(method string, s *Server, path string, fn func(http.ResponseWriter, *http.Request)) {
+func handleVerbs(method string, s *Server, path string, fn func(http.ResponseWriter, *http.Request), middlewares []func(Handler) Handler) {
 	_, ok := s.router[path]
 	if !ok {
-		s.router[path] = make(map[string]func(http.ResponseWriter, *http.Request))
+		s.router[path] = make(map[string][]interface{})
 	}
-	s.router[path][method] = fn
+	_, ok = s.router[path][method]
+	if !ok {
+		s.router[path][method] = make([]interface{}, 0)
+	}
+	s.router[path][method] = append(s.router[path][method], fn)
+	for _, middleware := range middlewares {
+		s.router[path][method] = append(s.router[path][method], middleware)
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -77,12 +84,33 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == key {
 			for k, v := range value {
 				if r.Method == k {
+					length := len(v)
+					fn := v[0].(func(http.ResponseWriter, *http.Request))
 					if len(s.middlewares) > 0 {
-						Merge(w, r, Handler{v}, s.middlewares)
-						return
+						if length > 1 {
+							middlewares := make([]func(Handler) Handler, length-1)
+							for i, h := range v[1:] {
+								middlewares[i] = h.(func(Handler) Handler)
+							}
+							newM := append(s.middlewares, middlewares...)
+							Merge(w, r, Handler{fn}, newM)
+							return
+						} else {
+							Merge(w, r, Handler{fn}, s.middlewares)
+							return
+						}
 					} else {
-						v(w, r)
-						return
+						if length > 1 {
+							middlewares := make([]func(Handler) Handler, length-1)
+							for i, h := range v[1:] {
+								middlewares[i] = h.(func(Handler) Handler)
+							}
+							Merge(w, r, Handler{fn}, middlewares)
+							return
+						} else {
+							fn(w, r)
+							return
+						}
 					}
 				}
 			}
@@ -96,20 +124,20 @@ func (s *Server) Use(fn func(Handler) Handler) {
 	s.middlewares = append(s.middlewares, fn)
 }
 
-func (s *Server) Get(path string, fn func(http.ResponseWriter, *http.Request)) {
-	handleVerbs("GET", s, path, fn)
+func (s *Server) Get(path string, fn func(http.ResponseWriter, *http.Request), middlewares ...func(Handler) Handler) {
+	handleVerbs("GET", s, path, fn, middlewares)
 }
 
-func (s *Server) Post(path string, fn func(http.ResponseWriter, *http.Request)) {
-	handleVerbs("POST", s, path, fn)
+func (s *Server) Post(path string, fn func(http.ResponseWriter, *http.Request), middlewares ...func(Handler) Handler) {
+	handleVerbs("POST", s, path, fn, middlewares)
 }
 
-func (s *Server) Put(path string, fn func(http.ResponseWriter, *http.Request)) {
-	handleVerbs("PUT", s, path, fn)
+func (s *Server) Put(path string, fn func(http.ResponseWriter, *http.Request), middlewares ...func(Handler) Handler) {
+	handleVerbs("PUT", s, path, fn, middlewares)
 }
 
-func (s *Server) Delete(path string, fn func(http.ResponseWriter, *http.Request)) {
-	handleVerbs("DELETE", s, path, fn)
+func (s *Server) Delete(path string, fn func(http.ResponseWriter, *http.Request), middlewares ...func(Handler) Handler) {
+	handleVerbs("DELETE", s, path, fn, middlewares)
 }
 
 // ==========================================================
@@ -262,11 +290,10 @@ func main() {
 	app.Use(logH)
 	app.Use(errorH)
 	app.Use(bodyParseH)
-	app.Use(authH)
 	app.Get("/test", test)
-	app.Get("/jsontest", testJSON)
+	app.Get("/jsontest", testJSON, authH)
 	app.Get("/jsonerror", testError)
 	app.Post("/postjson", postJSON)
-	app.Get("/gethtml", getHTML)
+	app.Get("/gethtml", getHTML, authH)
 	http.ListenAndServe(":8080", app)
 }
