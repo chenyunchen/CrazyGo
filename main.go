@@ -47,7 +47,7 @@ func testError(w http.ResponseWriter, r *http.Request) {
 
 // Test Error Example for Handlers
 func postJSON(w http.ResponseWriter, r *http.Request) {
-	u := context.Get(r, "body").(user)
+	u := context.Get(r, "body").(*user)
 	fmt.Println(u.Id)
 	fmt.Println(u.FirstName)
 	fmt.Println(u.LastName)
@@ -63,11 +63,10 @@ func main() {
 	app := server.New()
 	app.Use(handlers.LogH)
 	app.Use(handlers.ErrorH)
-	//app.Use(handlers.bodyParseH)
 	app.Get("/test", test)
 	app.Get("/jsontest", testJSON, authH)
 	app.Get("/jsonerror", testError)
-	//app.Post("/postjson", postJSON)
+	app.Post("/postjson", postJSON, handlers.BodyParseH(user{}))
 	app.Get("/gethtml", getHTML, authH)
 	http.ListenAndServe(":8080", app)
 }

@@ -1,10 +1,12 @@
 package handlers
 
 import (
-	_ "github.com/chenyunchen/CrazyGo/context"
+	"encoding/json"
+	"github.com/chenyunchen/CrazyGo/context"
 	"github.com/chenyunchen/CrazyGo/error"
 	"log"
 	"net/http"
+	"reflect"
 	"time"
 )
 
@@ -59,17 +61,21 @@ func CheckHeaderH(h Handler) Handler {
 	return Handler{fn}
 }
 
-//func BodyParseH(h Handler) Handler {
-//	// curl -H 'Accept: application/vnd.api+json' -d '{"id":1234567, "first_name":"◓ Д ◒", "last_name":"ˊ● ω ●ˋ", "middle_name":""}' http://localhost:8080/postjson
-//	fn := func(w http.ResponseWriter, r *http.Request) {
-//		user := User{}
-//		err := json.NewDecoder(r.Body).Decode(&user)
-//		if err != nil {
-//			error.ResError(w, error.NotAcceptableError)
-//			return
-//		}
-//		context.Set(r, "body", user)
-//		h.Next(w, r)
-//	}
-//	return Handler{fn}
-//}
+func BodyParseH(obj interface{}) func(Handler) Handler {
+	// curl -H 'Accept: application/vnd.api+json' -d '{"id":1234567, "first_name":"◓ Д ◒", "last_name":"ˊ● ω ●ˋ", "middle_name":""}' http://localhost:8080/postjson
+	t := reflect.TypeOf(obj)
+	outerFn := func(h Handler) Handler {
+		fn := func(w http.ResponseWriter, r *http.Request) {
+			val := reflect.New(t).Interface()
+			err := json.NewDecoder(r.Body).Decode(val)
+			if err != nil {
+				error.ResError(w, error.NotAcceptableError)
+				return
+			}
+			context.Set(r, "body", val)
+			h.Next(w, r)
+		}
+		return Handler{fn}
+	}
+	return outerFn
+}
