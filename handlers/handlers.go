@@ -15,6 +15,9 @@ type Handler struct {
 	Next func(http.ResponseWriter, *http.Request)
 }
 
+// Define for lastwares' Handler
+var Exit Handler = Handler{func(w http.ResponseWriter, r *http.Request) { return }}
+
 // Merge Multiple Handler
 func Merge(w http.ResponseWriter, r *http.Request, h Handler, middlewares []func(Handler) Handler) {
 	var chain Handler
@@ -24,6 +27,14 @@ func Merge(w http.ResponseWriter, r *http.Request, h Handler, middlewares []func
 		chain = middleware(chain)
 	}
 	chain.Next(w, r)
+}
+
+func ClearH(h Handler) Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		context.Clear(r)
+		h.Next(w, r)
+	}
+	return Handler{fn}
 }
 
 func LogH(h Handler) Handler {

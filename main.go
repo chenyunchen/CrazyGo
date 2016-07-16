@@ -68,5 +68,6 @@ func main() {
 	app.Get("/jsonerror", testError)
 	app.Post("/postjson", postJSON, handlers.BodyParseH(user{}))
 	app.Get("/gethtml", getHTML, authH)
+	app.Use(handlers.ClearH)
 	http.ListenAndServe(":8080", app)
 }

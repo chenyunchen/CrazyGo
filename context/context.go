@@ -35,3 +35,9 @@ func Set(r *http.Request, key, value interface{}) {
 func Get(r *http.Request, key interface{}) interface{} {
 	return context[r][key]
 }
+func Delete(r *http.Request, key string) {
+	delete(context[r], key)
+}
+func Clear(r *http.Request) {
+	delete(context, r)
+}

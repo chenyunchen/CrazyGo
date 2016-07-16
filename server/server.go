@@ -12,10 +12,11 @@ import (
 type server struct {
 	router      map[string]map[string][]interface{}
 	middlewares []func(handlers.Handler) handlers.Handler
+	lastwares   map[string][]func(handlers.Handler) handlers.Handler
 }
 
 func New() *server {
-	return &server{make(map[string]map[string][]interface{}), make([]func(handlers.Handler) handlers.Handler, 0)}
+	return &server{make(map[string]map[string][]interface{}), make([]func(handlers.Handler) handlers.Handler, 0), make(map[string][]func(handlers.Handler) handlers.Handler)}
 }
 
 func handleVerbs(method string, s *server, path string, fn func(http.ResponseWriter, *http.Request), middlewares []func(handlers.Handler) handlers.Handler) {
@@ -34,40 +35,45 @@ func handleVerbs(method string, s *server, path string, fn func(http.ResponseWri
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for key, value := range s.router {
-		if r.URL.Path == key {
-			for k, v := range value {
-				if r.Method == k {
-					length := len(v)
-					fn := v[0].(func(http.ResponseWriter, *http.Request))
-					if len(s.middlewares) > 0 {
-						if length > 1 {
-							middlewares := make([]func(handlers.Handler) handlers.Handler, length-1)
-							for i, h := range v[1:] {
-								middlewares[i] = h.(func(handlers.Handler) handlers.Handler)
-							}
-							newM := append(s.middlewares, middlewares...)
-							handlers.Merge(w, r, handlers.Handler{fn}, newM)
-							return
-						} else {
-							handlers.Merge(w, r, handlers.Handler{fn}, s.middlewares)
-							return
-						}
-					} else {
-						if length > 1 {
-							middlewares := make([]func(handlers.Handler) handlers.Handler, length-1)
-							for i, h := range v[1:] {
-								middlewares[i] = h.(func(handlers.Handler) handlers.Handler)
-							}
-							handlers.Merge(w, r, handlers.Handler{fn}, middlewares)
-							return
-						} else {
-							fn(w, r)
-							return
-						}
-					}
-				}
+	v := s.router[r.URL.Path][r.Method]
+	length := len(v)
+	fn := v[0].(func(http.ResponseWriter, *http.Request))
+	if len(s.middlewares) > 0 {
+		if length > 1 {
+			middlewares := make([]func(handlers.Handler) handlers.Handler, length-1)
+			for i, h := range v[1:] {
+				middlewares[i] = h.(func(handlers.Handler) handlers.Handler)
 			}
+			newM := append(s.middlewares, middlewares...)
+			handlers.Merge(w, r, handlers.Handler{fn}, newM)
+			if len(s.lastwares[r.URL.Path]) != 0 {
+				handlers.Merge(w, r, handlers.Exit, s.lastwares[r.URL.Path])
+			}
+			return
+		} else {
+			handlers.Merge(w, r, handlers.Handler{fn}, s.middlewares)
+			if len(s.lastwares[r.URL.Path]) != 0 {
+				handlers.Merge(w, r, handlers.Exit, s.lastwares[r.URL.Path])
+			}
+			return
+		}
+	} else {
+		if length > 1 {
+			middlewares := make([]func(handlers.Handler) handlers.Handler, length-1)
+			for i, h := range v[1:] {
+				middlewares[i] = h.(func(handlers.Handler) handlers.Handler)
+			}
+			handlers.Merge(w, r, handlers.Handler{fn}, middlewares)
+			if len(s.lastwares[r.URL.Path]) != 0 {
+				handlers.Merge(w, r, handlers.Exit, s.lastwares[r.URL.Path])
+			}
+			return
+		} else {
+			fn(w, r)
+			if len(s.lastwares[r.URL.Path]) != 0 {
+				handlers.Merge(w, r, handlers.Exit, s.lastwares[r.URL.Path])
+			}
+			return
 		}
 	}
 	http.NotFound(w, r)
@@ -75,7 +81,17 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) Use(fn func(handlers.Handler) handlers.Handler) {
-	s.middlewares = append(s.middlewares, fn)
+	if len(s.router) == 0 {
+		s.middlewares = append(s.middlewares, fn)
+	} else {
+		for path, _ := range s.router {
+			_, ok := s.lastwares[path]
+			if !ok {
+				s.lastwares[path] = make([]func(handlers.Handler) handlers.Handler, 0)
+			}
+			s.lastwares[path] = append(s.lastwares[path], fn)
+		}
+	}
 }
 
 func (s *server) Get(path string, fn func(http.ResponseWriter, *http.Request), middlewares ...func(handlers.Handler) handlers.Handler) {
