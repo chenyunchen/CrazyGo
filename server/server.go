@@ -37,6 +37,10 @@ func handleVerbs(method string, s *server, path string, fn func(http.ResponseWri
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	v := s.router[r.URL.Path][r.Method]
 	length := len(v)
+	if length == 0 {
+		http.NotFound(w, r)
+		return
+	}
 	fn := v[0].(func(http.ResponseWriter, *http.Request))
 	if len(s.middlewares) > 0 {
 		if length > 1 {
@@ -76,8 +80,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.NotFound(w, r)
-	return
 }
 
 func (s *server) Use(fn func(handlers.Handler) handlers.Handler) {
